@@ -29,6 +29,7 @@ from src.retriever import (
 )
 from src.ranking.reranker import rerank
 from src.cache import get_cache
+from src.chunk_buffer import ChunkFrequencyTracker
 
 ANSWER_NOT_FOUND = "I'm sorry, but I don't have enough information to answer that question."
 
@@ -87,6 +88,10 @@ def run_index_mode(args: argparse.Namespace, cfg: RAGConfig):
         use_multiprocessing=args.multiproc_indexing,
         use_headings=args.embed_with_headings,
         chapters_to_index=args.chapters,
+        faiss_index_type=cfg.faiss_index_type,
+        ivf_nlist=cfg.ivf_nlist,
+        pq_m=cfg.pq_m,
+        pq_nbits=cfg.pq_nbits,
     )
 
 def run_add_chapters_mode(args: argparse.Namespace, cfg: RAGConfig):
@@ -119,6 +124,10 @@ def run_add_chapters_mode(args: argparse.Namespace, cfg: RAGConfig):
         index_prefix=args.index_prefix,
         chapters_to_add=args.chapters,
         use_headings=args.embed_with_headings,
+        faiss_index_type=cfg.faiss_index_type,
+        ivf_nlist=cfg.ivf_nlist,
+        pq_m=cfg.pq_m,
+        pq_nbits=cfg.pq_nbits,
     )
     print("Successfully added chapters to the index.")
 
@@ -215,8 +224,14 @@ def get_answer(
         #     print(f"  {retriever_name}: {list(score_dict.values())}")
         # Step 2: Ranking
         ordered, scores = ranker.rank(raw_scores=raw_scores)
-        # print(f"Ordered candidate indices after ranking: {ordered[:cfg.top_k]}")
-        # print(f"Corresponding scores: {scores[:cfg.top_k]}")
+
+        # Buffer pool boost: promote chunks hot from previous queries
+        chunk_buffer = artifacts.get("chunk_buffer")
+        if cfg.chunk_buffer_enabled and chunk_buffer is not None:
+            ordered, scores = chunk_buffer.rerank_with_boost(
+                ordered, scores, cfg.chunk_buffer_boost
+            )
+
         topk_idxs = filter_retrieved_chunks(cfg, chunks, ordered)
         ranked_chunks = [chunks[i] for i in topk_idxs]
         # print(f"Top-{cfg.top_k} chunk indices after filtering: {topk_idxs}")
@@ -255,6 +270,10 @@ def get_answer(
 
         # Step 3: Final re-ranking
         ranked_chunks = rerank(question, ranked_chunks, mode=cfg.rerank_mode, top_n=cfg.rerank_top_k)
+
+        # Record this query's top-k in the buffer for future queries
+        if cfg.chunk_buffer_enabled and chunk_buffer is not None:
+            chunk_buffer.record(topk_idxs)
         # print("Reranked Chunks", type(ranked_chunks), len(ranked_chunks), type(ranked_chunks[0]) if ranked_chunks else "No chunks")
         # print("Example reranked chunk content:", ranked_chunks[0] if ranked_chunks else "No chunks after reranking")
 
@@ -381,13 +400,27 @@ def run_chat_session(args: argparse.Namespace, cfg: RAGConfig):
         cfg.page_to_chunk_map_path = cfg.get_page_to_chunk_map_path(artifacts_dir, args.index_prefix)
         faiss_idx, bm25_idx, chunks, sources, meta = load_artifacts(artifacts_dir, args.index_prefix)
         print(f"Loaded {len(chunks)} chunks and {len(sources)} sources from artifacts.")
-        retrievers = [FAISSRetriever(faiss_idx, cfg.embed_model), BM25Retriever(bm25_idx)]
+        retrievers = [FAISSRetriever(faiss_idx, cfg.embed_model, nprobe=cfg.nprobe), BM25Retriever(bm25_idx)]
         if cfg.ranker_weights.get("index_keywords", 0) > 0:
             retrievers.append(IndexKeywordRetriever(cfg.extracted_index_path, cfg.page_to_chunk_map_path))
         
         ranker = EnsembleRanker(ensemble_method=cfg.ensemble_method, weights=cfg.ranker_weights, rrf_k=int(cfg.rrf_k))
         print("Loaded retrievers and initialized ranker.")
-        artifacts = {"chunks": chunks, "sources": sources, "retrievers": retrievers, "ranker": ranker, "meta": meta}
+        chunk_buffer = (
+            ChunkFrequencyTracker(
+                window_size=cfg.chunk_buffer_window,
+                max_chunks=500,
+            )
+            if cfg.chunk_buffer_enabled else None
+        )
+        artifacts = {
+            "chunks": chunks,
+            "sources": sources,
+            "retrievers": retrievers,
+            "ranker": ranker,
+            "meta": meta,
+            "chunk_buffer": chunk_buffer,
+        }
     except Exception as e:
         print(f"ERROR: {e}. Run 'index' mode first.")
         sys.exit(1)

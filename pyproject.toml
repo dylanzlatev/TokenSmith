@@ -23,6 +23,7 @@ include = ["src*"]
 [tool.pytest.ini_options]
 markers = [
     "unit: Unit tests for API compatibility (run with: pytest -m unit)",
+    "ann_benchmark: ANN index benchmarks — no LLM needed (run with: pytest tests/test_ann_benchmark.py)",
 ]
 testpaths = ["tests"]
 

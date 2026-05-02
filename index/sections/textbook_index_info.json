@@ -1,0 +1,11 @@
+{
+  "textbooks": [
+    {
+      "markdown_file": "data/silberschatz--extracted_markdown.md",
+      "chapters": [
+        "all"
+      ],
+      "status": "full"
+    }
+  ]
+}

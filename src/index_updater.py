@@ -33,6 +33,10 @@ def add_to_index(
     chapters_to_add: List[int],
     use_multiprocessing: bool = False,
     use_headings: bool = False,
+    faiss_index_type: str = "flat",
+    ivf_nlist: int = 256,
+    pq_m: int = 16,
+    pq_nbits: int = 8,
 ) -> None:
     """
     Adds new chapters to an existing FAISS and BM25 index.
@@ -60,6 +64,10 @@ def add_to_index(
             use_multiprocessing=use_multiprocessing,
             use_headings=use_headings,
             chapters_to_index=chapters_to_add,
+            faiss_index_type=faiss_index_type,
+            ivf_nlist=ivf_nlist,
+            pq_m=pq_m,
+            pq_nbits=pq_nbits,
         )
         return
 

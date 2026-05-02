@@ -60,6 +60,18 @@ class RAGConfig:
     extracted_index_path: os.PathLike = "data/extracted_index.json"
     page_to_chunk_map_path: os.PathLike = "index/sections/textbook_index_page_to_chunk_map.json"
 
+    # Chunk buffer pool settings
+    chunk_buffer_enabled: bool  = False
+    chunk_buffer_window:  int   = 20    # queries tracked in the sliding window
+    chunk_buffer_boost:   float = 0.15  # max multiplicative boost for hot chunks
+
+    # FAISS ANN index settings
+    faiss_index_type: str = "flat"   # flat | ivf_flat | ivf_pq
+    ivf_nlist: int = 256             # number of Voronoi cells (IVF only)
+    nprobe: int = 8                  # cells probed at query time (IVF only)
+    pq_m: int = 16                   # PQ sub-quantizers; must divide embedding dim (ivf_pq only)
+    pq_nbits: int = 8                # bits per PQ code; 4 or 8 (ivf_pq only)
+
     # user feedback modeling
     enable_topic_extraction: bool = False
 
@@ -79,6 +91,15 @@ class RAGConfig:
         if self.ensemble_method.lower() in {"linear", "weighted"}:
             s = sum(self.ranker_weights.values()) or 1.0
             self.ranker_weights = {k: v / s for k, v in self.ranker_weights.items()}
+        assert self.chunk_buffer_window >= 1, "chunk_buffer_window must be >= 1"
+        assert self.chunk_buffer_boost >= 0, "chunk_buffer_boost must be >= 0"
+        assert self.faiss_index_type in {"flat", "ivf_flat", "ivf_pq"}, (
+            f"faiss_index_type must be 'flat', 'ivf_flat', or 'ivf_pq', got '{self.faiss_index_type}'"
+        )
+        assert self.ivf_nlist > 0, "ivf_nlist must be > 0"
+        assert self.nprobe > 0, "nprobe must be > 0"
+        assert self.pq_m > 0, "pq_m must be > 0"
+        assert self.pq_nbits in {4, 8}, "pq_nbits must be 4 or 8"
         self.chunk_config = self.get_chunk_config()
         self.chunk_config.validate()
 

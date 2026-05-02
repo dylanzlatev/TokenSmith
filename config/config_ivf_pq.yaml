@@ -29,10 +29,10 @@ chunk_buffer_enabled: false
 chunk_buffer_window: 20
 chunk_buffer_boost: 0.15
 
-# FAISS ANN index settings
-# faiss_index_type options: flat (exact), ivf_flat (IVF exact-storage), ivf_pq (IVF + product quantization)
-faiss_index_type: "flat"
+# FAISS ANN index settings — IVF-PQ preset
+# Re-index after switching: make run-index
+faiss_index_type: "ivf_pq"
 ivf_nlist: 256
-nprobe: 8
+nprobe: 16
 pq_m: 16
 pq_nbits: 8

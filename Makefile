@@ -1,14 +1,19 @@
-.PHONY: help env build-llama clean test run-index run-chat run-index-partial run-add-chapters-partial run-chat-partial install update-env
+.PHONY: help env build-llama clean test test-ann test-ann-real report-ann eval-chunk-buffer eval-all run-index run-chat run-index-partial run-add-chapters-partial run-chat-partial install update-env
 
 help:
 	@echo "TokenSmith - RAG Application (Conda Dependencies)"
 	@echo "Available targets:"
 	@echo "  env         - Create conda environment with all dependencies"
 	@echo "  update-env  - Update environment from environment.yml"
-	@echo "  build-llama - Build llama.cpp (if not found)"  
+	@echo "  build-llama - Build llama.cpp (if not found)"
 	@echo "  install     - Install package in development mode"
-	@echo "  test        - Run tests"
-	@echo "  clean       - Clean build artifacts"
+	@echo "  test        - Run all tests"
+	@echo "  test-ann         - Run ANN unit + synthetic benchmark tests (no model needed)"
+	@echo "  test-ann-real    - Run real-corpus ANN evaluation (requires index + model)"
+	@echo "  report-ann       - Write ANN results table to tests/results/ann_report.txt"
+	@echo "  eval-chunk-buffer - Evaluate buffer pool on textbook sessions → tests/results/"
+	@echo "  eval-all         - Run real ANN eval + chunk buffer eval (requires index + model)"
+	@echo "  clean            - Clean build artifacts"
 	@echo "  show-deps   - Show installed conda packages"
 	@echo "  export-env  - Export current environment"
 	@echo "  run-index-partial - Create a partial index (e.g., make run-index-partial CHAPTERS=\"1 2\")"
@@ -54,6 +59,45 @@ export-env:
 # Run tests
 test:
 	conda run -n tokensmith python -m pytest tests/ -v || echo "No tests found"
+
+# ANN benchmark tests — no LLM or textbook index required
+test-ann:
+	@echo "Running ANN unit + synthetic benchmark tests..."
+	conda run -n tokensmith python -m pytest \
+		tests/test_ann_integration.py \
+		tests/test_ann_benchmark.py \
+		tests/test_chunk_buffer.py \
+		-s -v $(ARGS)
+
+# Real-corpus ANN evaluation — requires 'make run-index' and the embedding model
+test-ann-real:
+	@echo "Running real-corpus ANN evaluation (requires index + model)..."
+	conda run -n tokensmith python -m pytest tests/test_ann_real_index.py -s -v $(ARGS)
+
+# Aggregate results from tests/results/ann_*.json into a formatted report file
+report-ann:
+	@echo "Generating ANN evaluation report..."
+	conda run -n tokensmith python tests/utils/ann_report.py \
+		--out tests/results/ann_report.txt $(ARGS)
+	@echo "Report written to tests/results/ann_report.txt"
+
+# Chunk buffer pool evaluation — requires index + embedding model
+eval-chunk-buffer:
+	@echo "Running chunk buffer pool evaluation..."
+	conda run -n tokensmith python tests/eval_chunk_buffer.py \
+		--config config/config.yaml $(ARGS)
+	@echo "Results written to tests/results/chunk_buffer_eval.json"
+	@echo "Report  written to tests/results/chunk_buffer_report.txt"
+
+# Run both real-corpus ANN eval and chunk buffer eval, then generate the ANN report
+eval-all: test-ann-real eval-chunk-buffer report-ann
+	@echo ""
+	@echo "All evaluations complete. Output files:"
+	@echo "  tests/results/ann_report.txt"
+	@echo "  tests/results/ann_real_index_results.json"
+	@echo "  tests/results/ann_per_question_recall.json"
+	@echo "  tests/results/chunk_buffer_report.txt"
+	@echo "  tests/results/chunk_buffer_eval.json"
 
 # Clean
 clean:

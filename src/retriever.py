@@ -89,9 +89,12 @@ class Retriever(ABC):
 class FAISSRetriever(Retriever):
     name = "faiss"
 
-    def __init__(self, index, embed_model: str):
+    def __init__(self, index, embed_model: str, nprobe: int = 1):
         self.index = index
         self.embedder = _get_embedder(embed_model)
+        # nprobe only applies to IVF-family indexes; flat indexes ignore it
+        if hasattr(index, 'nprobe'):
+            index.nprobe = nprobe
 
     def get_scores(self,
                 query: str,

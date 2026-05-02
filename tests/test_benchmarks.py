@@ -208,6 +208,7 @@ def get_tokensmith_answer(question, config, golden_chunks=None):
         use_indexed_chunks=config.get("use_indexed_chunks", False),
         extracted_index_path=config.get("extracted_index_path", "data/extracted_index.json"),
         page_to_chunk_map_path=config.get("page_to_chunk_map_path", "index/sections/textbook_index_page_to_chunk_map.json"),
+        nprobe=config.get("nprobe", 1),
     )
     
     # Print status
@@ -230,7 +231,7 @@ def get_tokensmith_answer(question, config, golden_chunks=None):
     )
 
     retrievers = [
-        FAISSRetriever(faiss_index, cfg.embed_model),
+        FAISSRetriever(faiss_index, cfg.embed_model, nprobe=cfg.nprobe),
         BM25Retriever(bm25_index)
     ]
     

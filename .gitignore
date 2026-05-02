@@ -253,3 +253,4 @@ marimo/_lsp/
 __marimo__/
 
 tests/results
+*.deb

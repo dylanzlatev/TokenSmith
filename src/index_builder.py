@@ -30,6 +30,75 @@ os.environ["NUMEXPR_NUM_THREADS"] = "1"
 DEFAULT_EXCLUSION_KEYWORDS = ['questions', 'exercises', 'summary', 'references']
 
 
+def build_faiss_index(
+    embeddings: np.ndarray,
+    *,
+    faiss_index_type: str = "flat",
+    ivf_nlist: int = 256,
+    pq_m: int = 16,
+    pq_nbits: int = 8,
+) -> faiss.Index:
+    """
+    Factory that builds a FAISS index of the requested type.
+
+    flat     — IndexFlatL2: exact brute-force; zero training required.
+    ivf_flat — IndexIVFFlat: IVF with full-precision storage; faster search
+               via cell pruning, same recall as flat at nprobe=nlist.
+    ivf_pq   — IndexIVFPQ: IVF with product-quantized storage; dramatically
+               smaller index at the cost of slight recall reduction.
+
+    IVF indexes need at least 39 * nlist training vectors.  If the corpus is
+    too small the function logs a warning and falls back to flat automatically.
+    """
+    n, dim = embeddings.shape
+    min_train = 39 * ivf_nlist
+
+    if faiss_index_type != "flat" and n < min_train:
+        print(
+            f"[WARNING] Corpus has {n} vectors but IVF training needs ≥{min_train} "
+            f"(39 × nlist={ivf_nlist}). Falling back to IndexFlatL2."
+        )
+        faiss_index_type = "flat"
+
+    if faiss_index_type == "flat":
+        index = faiss.IndexFlatL2(dim)
+        index.add(embeddings)
+        return index
+
+    quantizer = faiss.IndexFlatL2(dim)
+
+    if faiss_index_type == "ivf_flat":
+        index = faiss.IndexIVFFlat(quantizer, dim, ivf_nlist, faiss.METRIC_L2)
+    elif faiss_index_type == "ivf_pq":
+        min_pq_train = 39 * (2 ** pq_nbits)
+        if n < min_pq_train:
+            print(
+                f"[WARNING] PQ training may be suboptimal: corpus has {n} vectors "
+                f"but {2**pq_nbits} PQ codewords need ≥{min_pq_train} training points "
+                f"(39 × 2^pq_nbits={pq_nbits}). Recall may be reduced. "
+                f"Consider lowering pq_nbits or increasing corpus size."
+            )
+        if dim % pq_m != 0:
+            valid = [m for m in range(1, min(dim + 1, 257)) if dim % m == 0]
+            raise ValueError(
+                f"pq_m={pq_m} does not divide embedding dim={dim}. "
+                f"Valid pq_m values (up to 256): {valid}"
+            )
+        index = faiss.IndexIVFPQ(quantizer, dim, ivf_nlist, pq_m, pq_nbits)
+    else:
+        raise ValueError(
+            f"Unknown faiss_index_type '{faiss_index_type}'. "
+            "Expected one of: flat, ivf_flat, ivf_pq"
+        )
+
+    n_train = min(n, 256 * ivf_nlist)
+    print(f"Training {faiss_index_type.upper()} index on {n_train:,} vectors (nlist={ivf_nlist})...")
+    index.train(embeddings[:n_train])
+    index.add(embeddings)
+    print(f"{faiss_index_type.upper()} index built: {index.ntotal:,} vectors, dim={dim}")
+    return index
+
+
 def build_index(
     markdown_file: str,
     *,
@@ -41,7 +110,11 @@ def build_index(
     index_prefix: str,
     use_multiprocessing: bool = False,
     use_headings: bool = False,
-    chapters_to_index: Optional[List[int]] = None
+    chapters_to_index: Optional[List[int]] = None,
+    faiss_index_type: str = "flat",
+    ivf_nlist: int = 256,
+    pq_m: int = 16,
+    pq_nbits: int = 8,
 ) -> None:
     """
     Extract sections, chunk, embed, and build both FAISS and BM25 indexes.
@@ -171,12 +244,16 @@ def build_index(
         )
 
     # Step 3: Build FAISS index
-    print(f"Building FAISS index for {len(all_chunks):,} chunks...")
-    dim = embeddings.shape[1]
-    index = faiss.IndexFlatL2(dim)
-    index.add(embeddings)
+    print(f"Building {faiss_index_type.upper()} FAISS index for {len(all_chunks):,} chunks...")
+    index = build_faiss_index(
+        embeddings,
+        faiss_index_type=faiss_index_type,
+        ivf_nlist=ivf_nlist,
+        pq_m=pq_m,
+        pq_nbits=pq_nbits,
+    )
     faiss.write_index(index, str(artifacts_dir / f"{index_prefix}.faiss"))
-    print(f"FAISS index built: {index_prefix}.faiss")
+    print(f"FAISS index written: {index_prefix}.faiss")
 
     # Step 4: Build BM25 index
     print(f"Building BM25 index for {len(all_chunks):,} chunks...")
@@ -203,7 +280,11 @@ def build_index(
                 "chapters": chapters_to_index if chapters_to_index else ["all"],
                 "status": "partial" if chapters_to_index else "full"
             }
-        ]
+        ],
+        "faiss_index_type": faiss_index_type,
+        "ivf_nlist": ivf_nlist,
+        "pq_m": pq_m,
+        "pq_nbits": pq_nbits,
     }
     with open(output_file, "w") as f:
         json.dump(index_info, f, indent=2)
